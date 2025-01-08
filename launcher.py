@@ -525,6 +525,22 @@ def main():
                     logging.info("Game is currently running. Please close it first.")
                     input("Press enter to continue...")
                     continue
+                
+                # Check log blocker status and enable if needed
+                status, _ = check_log_blocker_status(logs_path)
+                if status == "NOT RUNNING":
+                    print("Log blocker is off, Enabling it before launching game...")
+                    if set_folder_permissions(logs_path, False):
+                        logger.info("Log Blocker enabled successfully (automatic).")
+                        print("Log Blocker is now enabled (automatic).")
+                        config.set("CONFIG", "logs_blocked", "true")
+                        with open(CONFIG_FILE, "w") as f:
+                            config.write(f)
+                    else:
+                        logger.error("Failed to enable Log Blocker (automatic)!")
+                        print("Failed to enable Log Blocker (automatic).")
+                    time.sleep(2)
+                
                 ver = check_game_version()
                 use_dx11 = args.dx11 or cfg["dx11"] == "true"
 
@@ -609,6 +625,6 @@ def main():
                 cleanup()
                 print("Manual cleanup performed.")
                 time.sleep(2)
-
+                
 if __name__ == "__main__":
     main()
