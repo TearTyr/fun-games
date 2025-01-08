@@ -17,8 +17,10 @@ from tkinter import filedialog
 import pywintypes
 import msvcrt
 import threading
+import atexit
 
-LOG_FILE = "ww_tweaks.log"
+# --- Constants ---
+LOG_FILE = "fun_launcher.log"
 CONFIG_FILE = "config.ini"
 DEFAULT_LOGS_FOLDER = r"C:\Program Files\Wuthering Waves\Wuthering Waves Game\Client\Saved\Logs"
 USERS_GROUP = "Users"
@@ -37,99 +39,18 @@ MENU_OPTIONS = [
     "Exit",
 ]
 
+# --- Logging Setup ---
 logging.basicConfig(
     filename=LOG_FILE,
     level=logging.DEBUG,
     format="%(asctime)s - %(levelname)s - %(message)s",
 )
-logger = logging.getLogger("WW-Tweaks")
+logger = logging.getLogger("Fun-Launcher")
+
+# --- Configuration ---
 config = ConfigParser()
 
-def hide_console():
-    hwnd = ctypes.windll.kernel32.GetConsoleWindow()
-    if hwnd:
-        ctypes.windll.user32.ShowWindow(hwnd, 0)
-
-def clear_console():
-    os.system("cls" if os.name == "nt" else "clear")
-
-def show_console():
-    hwnd = ctypes.windll.kernel32.GetConsoleWindow()
-    if hwnd:
-        ctypes.windll.user32.ShowWindow(hwnd, 5)
-
-def is_process_running(process_name: str) -> bool:
-    for proc in psutil.process_iter(["name"]):
-        try:
-            if proc.info["name"] == process_name:
-                return True
-        except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
-            pass
-    return False
-
-def check_config_exists():
-    return os.path.exists(CONFIG_FILE)
-
-def create_default_config():
-    if not check_config_exists():
-        config.add_section("CONFIG")
-        config.set("CONFIG", "game_paks_directory", "")
-        config.set("CONFIG", "game_executable_path", "")
-        config.set("CONFIG", "binaries_dir", "")
-        config.set("CONFIG", "game_dir", "")
-        config.set("CONFIG", "loader_dir", "./pak/loader/~mods")
-        config.set("CONFIG", "bypass_sig_dir", "./pak/bypass")
-        config.set("CONFIG", "debug_dir", "./pak/debug")
-        config.set("CONFIG", "mod_directory", "./pak/Mod")
-        config.set("CONFIG", "debug_mode", "false")
-        config.set("CONFIG", "version", "")
-        config.set("CONFIG", "dx11", "true")
-        config.set("CONFIG", "logs_folder", DEFAULT_LOGS_FOLDER)
-        config.set("CONFIG", "logs_blocked", "false")
-        with open(CONFIG_FILE, "w") as f:
-            config.write(f)
-        logger.info("config.ini created with default settings.")
-
-def save_game_directory():
-    path = askdirectory(title="Select Wuthering Wave Game Folder")
-    if path:
-        if not is_valid_game_directory(path):
-            print("Invalid game directory selected. Please choose a valid directory.")
-            logger.error("Invalid game directory selected.")
-            return
-        config.read(CONFIG_FILE)
-        if not config.has_section("CONFIG"):
-            config.add_section("CONFIG")
-        game_paks_path = os.path.join(path, "Client", "Content", "Paks")
-        game_exe_path = os.path.join(path, "Client", "Binaries", "Win64")
-        binaries_path = os.path.join(path, "Client", "Binaries", "Win64")
-        game_dir = os.path.join(path)
-        config.set("CONFIG", "game_executable_path", game_exe_path)
-        config.set("CONFIG", "game_paks_directory", game_paks_path)
-        config.set("CONFIG", "binaries_dir", binaries_path)
-        config.set("CONFIG", "game_dir", game_dir)
-        with open(CONFIG_FILE, "w") as f:
-            config.write(f)
-
-def is_valid_game_directory(path: str) -> bool:
-    required_files = ["Client-Win64-Shipping.exe"]
-    return all(os.path.exists(os.path.join(path, "Client", "Binaries", "Win64", file)) for file in required_files)
-
-def check_and_save_config():
-    create_default_config()
-    config.read(CONFIG_FILE)
-
-    if not config.has_section("CONFIG"):
-        logger.warning("CONFIG section is missing, creating default config.")
-        create_default_config()
-
-    if not config.has_option("CONFIG", "game_paks_directory") or not config.get("CONFIG", "game_paks_directory"):
-        logger.warning("Wuthering Waves not found, select Wuthering Wave Game folder.")
-        save_game_directory()
-
-    if not config.has_option("CONFIG", "version") or not config.get("CONFIG", "version"):
-        set_game_version()
-
+# --- Type Definitions ---
 class LoadConfigTyped(TypedDict):
     game_paks_directory: str
     mod_directory: str
@@ -145,167 +66,133 @@ class LoadConfigTyped(TypedDict):
     logs_folder: str
     logs_blocked: str
 
-def load_config() -> LoadConfigTyped:
-    config.read(CONFIG_FILE)
-    try:
-        return LoadConfigTyped(
-            game_paks_directory=config.get("CONFIG", "game_paks_directory").strip('"'),
-            mod_directory=config.get("CONFIG", "mod_directory").strip('"'),
-            game_executable_path=config.get("CONFIG", "game_executable_path").strip('"'),
-            bypass_sig_dir=config.get("CONFIG", "bypass_sig_dir").strip('"'),
-            loader_dir=config.get("CONFIG", "loader_dir").strip('"'),
-            binaries_dir=config.get("CONFIG", "binaries_dir").strip('"'),
-            game_dir=config.get("CONFIG", "game_dir").strip('"'),
-            debug_mode=config.get("CONFIG", "debug_mode").strip('"').lower(),
-            debug_dir=config.get("CONFIG", "debug_dir").strip('"'),
-            version=config.get("CONFIG", "version").strip('"'),
-            dx11=config.get("CONFIG", "dx11").strip('"'),
-            logs_folder=config.get("CONFIG", "logs_folder", fallback=DEFAULT_LOGS_FOLDER),
-            logs_blocked=config.get("CONFIG", "logs_blocked").strip('"')
-        )
-    except (ConfigParser.NoSectionError, ConfigParser.NoOptionError) as e:
-        logger.error(f"Error reading config: {e}")
-        print(f"Error: Configuration issue. Please check {CONFIG_FILE}.")
-        sys.exit(1)
-    except Exception as e:
-        logger.error(f"Unexpected error reading config: {e}")
-        print(f"An unexpected error occurred. Please check {LOG_FILE} for details.")
-        sys.exit(1)
+# --- Utility Functions ---
+def hide_console():
+    """Hides the console window."""
+    hwnd = ctypes.windll.kernel32.GetConsoleWindow()
+    if hwnd:
+        ctypes.windll.user32.ShowWindow(hwnd, 0)
 
-def run_program(executable_path, args=None):
-    cfg = load_config()
-    try:
-        if args is None:
-            args = []
-        logging.info("Starting the game")
-        print("This cheat is free. If you bought it, you might have been SCAMMED!")
-        print("Credits: Xoph")
-        print("Starting the game, Please wait...")
-        time.sleep(5)
-        hide_console()
-        clear_console()
-        process = subprocess.Popen(
-            [executable_path] + args,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            cwd=cfg["game_executable_path"],
-        )
-        monitor_thread = threading.Thread(target=monitor_process, args=(process,))
-        monitor_thread.daemon = True
-        monitor_thread.start()
-        return process
-    except FileNotFoundError:
-        logger.error(f"Executable not found: {executable_path}")
-        print(f"Error: Executable not found at {executable_path}. Check game installation.")
-        show_console()
-        return None
-    except Exception as e:
-        logger.error(f"Error running executable: {e}")
-        print(f"An unexpected error occurred: {e}")
-        show_console()
-        return None
+def clear_console():
+    """Clears the console."""
+    os.system("cls" if os.name == "nt" else "clear")
 
-def prompt_disable_log_blocker():
-    while True:
-        clear_console()
-        print("Game closed. Checking if logs are blocked...")
-        logs_path = load_log_config()
-        if not check_log_blocker_status(logs_path)[0] == "RUNNING":
-            print("Logs are already unblocked.")
-            time.sleep(2)
-            main()
-            break
-        else:
-            print("Logs are blocked. Disabling log blocker...")
-            if set_folder_permissions(logs_path, True):
-                print("Log Blocker is now disabled.")
-                config.set("CONFIG", "logs_blocked", "false")
-                with open(CONFIG_FILE, "w") as f:
-                    config.write(f)
-            else:
-                print("Failed to disable Log Blocker.")
-            time.sleep(2)
-            main()
-            break
+def show_console():
+    """Shows the console window."""
+    hwnd = ctypes.windll.kernel32.GetConsoleWindow()
+    if hwnd:
+        ctypes.windll.user32.ShowWindow(hwnd, 5)
 
-def monitor_process(process):
-    try:
-        while True:
-            if process.poll() is not None:
-                show_console()
-                prompt_disable_log_blocker()
-                cleanup()
-                break
-            time.sleep(5)
-    except KeyboardInterrupt:
-        print("Stopping game due to interruption.")
-        terminate_process(process)
-
-def terminate_process(process):
-    try:
-        process.terminate()
-        process.wait(timeout=5)
-        logging.info(f"Process terminated.")
-    except subprocess.TimeoutExpired:
-        logging.info(f"Process did not terminate, killing...")
-        process.kill()
-        process.wait()
-        logging.info(f"Process killed.")
-
-def delete_mod_directory(path_dir: str, mod_dir: str):
-    try:
-        mod_folder_path = os.path.join(path_dir, os.path.basename(mod_dir))
-        if os.path.exists(mod_folder_path):
-            shutil.rmtree(mod_folder_path)
-            logging.info(f"Mod has been deleted.")
-        else:
-            logging.info(f"Mod does not exist.")
-    except Exception as e:
-        logging.error(f"Error deleting mod directory: {e}")
-
-def delete_files_from_list(path: str, file_list: List[str]):
-    for filename in file_list:
-        file_path = os.path.join(path, filename)
+def is_process_running(process_name: str) -> bool:
+    """Checks if a process with the given name is running."""
+    for proc in psutil.process_iter(["name"]):
         try:
-            if os.path.isfile(file_path):
-                os.remove(file_path)
-            else:
-                print(f"'{file_path}' is not a file or does not exist.")
-        except Exception as e:
-            logging.error(f"Error deleting file '{file_path}': {e}")
+            if proc.info["name"] == process_name:
+                return True
+        except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
+            pass
+    return False
 
-def force_close_process_windows(process_name: str):
+def resource_path(relative_path: str) -> str:
+    """Gets the absolute path to a resource, works for dev and for PyInstaller."""
     try:
-        subprocess.run(["taskkill", "/f", "/im", process_name], check=True)
-        print(f"Killed: {process_name}")
-    except subprocess.CalledProcessError as e:
-        logging.error(f"Failed to kill process: {e}")
-        sys.exit(1)
-    except Exception as e:
-        logging.error(f"Error: {e}")
-        sys.exit(1)
+        base_path = sys._MEIPASS
+    except AttributeError:
+        base_path = os.path.abspath(".")
+    return os.path.join(base_path, relative_path)
 
-def copy_file_or_folder(source: str, target: str, is_folder=False):
-    try:
-        if is_folder:
-            if os.path.exists(target):
-                shutil.rmtree(target)
-            shutil.copytree(source, target)
-            logging.info(f"Folder '{source}' copied to '{target}'")
-        else:
-            os.makedirs(os.path.dirname(target), exist_ok=True)
-            shutil.copy2(source, target)
-            logging.info(f"File '{os.path.basename(source)}' copied to '{target}'")
-    except FileNotFoundError:
-          print(f"Error: Source '{source}' not found.")
-          logging.error(f"Error: Source '{source}' not found.")
-          sys.exit(1)
-    except Exception as e:
-        print(f"Error copying: {e}")
-        logging.error(f"Error copying {source} to {target}: {e}")
-        sys.exit(1)
+# --- Configuration Management ---
+def create_default_config():
+    """Creates a default configuration file if it doesn't exist."""
+    if not os.path.exists(CONFIG_FILE):
+        config["CONFIG"] = {
+            "game_paks_directory": "",
+            "game_executable_path": "",
+            "binaries_dir": "",
+            "game_dir": "",
+            "loader_dir": "./pak/loader/~mods",
+            "bypass_sig_dir": "./pak/bypass",
+            "debug_dir": "./pak/debug",
+            "mod_directory": "./pak/Mod",
+            "debug_mode": "false",
+            "version": "",
+            "dx11": "true",
+            "logs_folder": DEFAULT_LOGS_FOLDER,
+            "logs_blocked": "false",
+        }
+        with open(CONFIG_FILE, "w") as f:
+            config.write(f)
+        logger.info("config.ini created with default settings.")
 
+def is_valid_game_directory(path: str) -> bool:
+    """Checks if the given path is a valid Wuthering Waves game directory."""
+    required_files = ["Client-Win64-Shipping.exe"]
+    return all(os.path.exists(os.path.join(path, "Client", "Binaries", "Win64", file)) for file in required_files)
+
+def save_game_directory():
+    """Prompts the user to select the Wuthering Waves game directory and saves it to the config."""
+    path = askdirectory(title="Select Wuthering Waves Game Folder")
+    if path:
+        if not is_valid_game_directory(path):
+            print("Invalid game directory selected. Please choose a valid directory.")
+            logger.error("Invalid game directory selected.")
+            return
+        config.read(CONFIG_FILE)
+        game_paks_path = os.path.join(path, "Client", "Content", "Paks")
+        game_exe_path = os.path.join(path, "Client", "Binaries", "Win64")
+        binaries_path = os.path.join(path, "Client", "Binaries", "Win64")
+        game_dir = os.path.join(path)
+        config["CONFIG"]["game_paks_directory"] = game_paks_path
+        config["CONFIG"]["game_executable_path"] = game_exe_path
+        config["CONFIG"]["binaries_dir"] = binaries_path
+        config["CONFIG"]["game_dir"] = game_dir
+        config["CONFIG"]["logs_folder"] = DEFAULT_LOGS_FOLDER
+        with open(CONFIG_FILE, "w") as f:
+            config.write(f)
+        logger.info(f"Game directory saved: {path}")
+
+def load_config() -> LoadConfigTyped:
+    """Loads the configuration from the config file."""
+    create_default_config()
+    config.read(CONFIG_FILE)
+
+    # Ensure CONFIG section exists
+    if not config.has_section("CONFIG"):
+        logger.warning("CONFIG section is missing, creating default config.")
+        create_default_config()
+        config.read(CONFIG_FILE)
+
+    # Check and set game directory if missing or invalid
+    if not config.has_option("CONFIG", "game_paks_directory") or not config.get("CONFIG", "game_paks_directory") or not is_valid_game_directory(config.get("CONFIG", "game_dir")):
+        logger.warning("Wuthering Waves game directory not found or invalid, prompting user to select.")
+        save_game_directory()
+        config.read(CONFIG_FILE)  # Reload after saving
+
+    # Check and set game version if missing
+    if not config.has_option("CONFIG", "version") or not config.get("CONFIG", "version"):
+        set_game_version()
+        config.read(CONFIG_FILE)  # Reload after setting
+
+    # Load and return configuration
+    return LoadConfigTyped(
+        game_paks_directory=config.get("CONFIG", "game_paks_directory").strip('"'),
+        mod_directory=config.get("CONFIG", "mod_directory").strip('"'),
+        game_executable_path=config.get("CONFIG", "game_executable_path").strip('"'),
+        bypass_sig_dir=config.get("CONFIG", "bypass_sig_dir").strip('"'),
+        loader_dir=config.get("CONFIG", "loader_dir").strip('"'),
+        binaries_dir=config.get("CONFIG", "binaries_dir").strip('"'),
+        game_dir=config.get("CONFIG", "game_dir").strip('"'),
+        debug_mode=config.get("CONFIG", "debug_mode").strip('"').lower(),
+        debug_dir=config.get("CONFIG", "debug_dir").strip('"'),
+        version=config.get("CONFIG", "version").strip('"'),
+        dx11=config.get("CONFIG", "dx11").strip('"'),
+        logs_folder=config.get("CONFIG", "logs_folder", fallback=DEFAULT_LOGS_FOLDER),
+        logs_blocked=config.get("CONFIG", "logs_blocked").strip('"')
+    )
+
+# --- Game Version Management ---
 def set_game_version():
+    """Prompts the user to select the game version (OS or CN) and saves it to the config."""
     while True:
         clear_console()
         print("Select Game Version: \n")
@@ -313,14 +200,14 @@ def set_game_version():
         print("  2. CN Version ")
         choice = input("Please select a version (1 or 2): ").strip()
         if choice == "1":
-            config.set("CONFIG", "version", "OS")
+            config["CONFIG"]["version"] = "OS"
             with open(CONFIG_FILE, "w") as f:
                 config.write(f)
             clear_console()
             time.sleep(2)
             return WW_OS_PAK
         elif choice == "2":
-            config.set("CONFIG", "version", "CN")
+            config["CONFIG"]["version"] = "CN"
             with open(CONFIG_FILE, "w") as f:
                 config.write(f)
             clear_console()
@@ -332,18 +219,21 @@ def set_game_version():
             time.sleep(1)
             clear_console()
 
-def check_game_version():
+def check_game_version() -> str:
+    """Checks the game version in the config and sets a default if it's invalid."""
     config_data = load_config()
     if config_data["version"] not in ["CN", "OS"]:
         default_ver = set_game_version()
     else:
         default_ver = WW_CN_PAK if config_data["version"] == "CN" else WW_OS_PAK
-    with open("./pak/bypass/libraries.txt", "w") as f:
+    with open(resource_path("./pak/bypass/libraries.txt"), "w") as f:
         f.write(default_ver)
     print(f"Game Version: {'Global' if config_data['version'] == 'OS' else 'CN'}")
     return default_ver
 
+# --- Log Blocker Functions ---
 def set_folder_permissions(folder_path: str, allow_write: bool = False) -> bool:
+    """Sets folder permissions to allow or deny write access for the Users group."""
     try:
         sd = win32security.GetFileSecurity(folder_path, win32security.DACL_SECURITY_INFORMATION)
         dacl = sd.GetSecurityDescriptorDacl()
@@ -369,26 +259,13 @@ def set_folder_permissions(folder_path: str, allow_write: bool = False) -> bool:
         return False
 
 def get_folder_with_ui() -> Optional[str]:
+    """Opens a simple UI for the user to select a folder."""
     root = tk.Tk()
     root.withdraw()
     return filedialog.askdirectory()
 
-def load_log_config() -> str:
-    config.read(CONFIG_FILE)
-    logs_folder = config.get("CONFIG", "logs_folder", fallback=DEFAULT_LOGS_FOLDER)
-    if not os.path.exists(logs_folder):
-        logger.warning(f"Logs folder not found: {logs_folder}")
-        logs_folder = get_folder_with_ui()
-        if not logs_folder:
-            logger.error("No folder selected. Exiting.")
-            sys.exit(1)
-        config.set("CONFIG", "logs_folder", logs_folder)
-        with open(CONFIG_FILE, "w") as f:
-            config.write(f)
-        logger.info(f"Updated config with logs folder: {logs_folder}")
-    return logs_folder
-
 def check_log_blocker_status(logs_path: str) -> Tuple[str, str]:
+    """Checks if the log blocker is currently enabled or disabled."""
     try:
         test_file = os.path.join(logs_path, "test.txt")
         with open(test_file, "w") as f:
@@ -402,19 +279,23 @@ def check_log_blocker_status(logs_path: str) -> Tuple[str, str]:
         status, color = "UNKNOWN", "\033[93m"
     return status, color
 
+# --- UI and Menu Functions ---
 def get_terminal_size():
+    """Gets the terminal size."""
     terminal_size = shutil.get_terminal_size()
     return terminal_size.columns, terminal_size.lines
 
 def center_text(text: str, width: int) -> str:
+    """Centers text within the given width."""
     return text.center(width)
 
 def display_menu_with_cursor(logs_path: str, selected_option: int):
+    """Displays the main menu with a cursor indicating the selected option."""
     clear_console()
     status, color = check_log_blocker_status(logs_path)
     term_width, _ = get_terminal_size()
     print("\n")
-    print(center_text("Wuthering Waves Tweaks", term_width))
+    print(center_text("Fun-Launcher", term_width))
     print(center_text(f"Logs Path: {logs_path}", term_width))
     print(center_text(f"Current Status: {color}{status}\033[0m", term_width))
     print()
@@ -424,11 +305,175 @@ def display_menu_with_cursor(logs_path: str, selected_option: int):
         print(center_text(f"{'\033[97m' if i == selected_option else ''}{padded_option}\033[0m", term_width))
 
 def get_key():
+    """Gets a keypress."""
     while True:
         if msvcrt.kbhit():
             return msvcrt.getch()
 
+# --- Game Launch and Mod Management ---
+def runProgram(executable_path, args=None):
+    """Runs the game executable with the given arguments"""
+    cfg = load_config()
+    try:
+        if args is None:
+            args = []
+        logging.info("Starting the game")
+        print("This cheat is free. If you bought it, you might have been SCAMMED!")
+        print("Credits: Xoph")
+        print("Launcher Credits: saefulbarkah")
+        print("Starting the game, Please wait 5 seconds...")
+        time.sleep(5)
+        hide_console()
+        clear_console()
+        # Start the process without admin privileges
+        process = subprocess.Popen(
+            [executable_path] + args,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            shell=True,  # This opens a new shell to execute the command
+            close_fds=True,  # Close file descriptors
+            cwd=cfg["game_executable_path"],
+        )
+
+        # Optionally, capture the output
+        stdout, stderr = process.communicate()
+        monitorProcess(process)
+
+    except Exception as e:
+        print(f"Error running executable: {e}")
+        logging.error(f"Error running executable: {e}")
+
+def monitorProcess(process):
+    """Monitors the game process"""
+    try:
+        while True:
+            if process.poll() is not None:  # Check if the process has terminated
+                show_console()
+                print("Game closed. Mods will be automatically removed.")  # Log the message
+                break  # Exit the loop if the process has terminated
+
+            time.sleep(5)  # Check every 5 seconds
+    except KeyboardInterrupt:
+        print("Stopping game due to interruption.")
+        terminateProcess(process)
+
+def terminateProcess(process):
+    """Terminates the game process."""
+    try:
+        process.terminate()
+        process.wait(timeout=5)
+        logging.info(f"Process terminated.")
+    except subprocess.TimeoutExpired:
+        logging.info(f"Process did not terminate in time, killing...")
+        process.kill()
+        process.wait()
+        logging.info(f"Process killed.")
+
+def delete_mod_directory(path_dir: str, mod_dir: str):
+    """Deletes the mod directory."""
+    try:
+        mod_folder_path = os.path.join(path_dir, os.path.basename(mod_dir))
+        if os.path.exists(mod_folder_path):
+            shutil.rmtree(mod_folder_path)
+            logging.info(f"Mod has been deleted.")
+        else:
+            logging.info(f"Mod does not exist.")
+    except Exception as e:
+        logging.error(f"Error deleting mod directory: {e}")
+
+def delete_files_from_list(path: str, file_list: List[str]):
+    """Deletes files from the given list in the specified path."""
+    for filename in file_list:
+        file_path = os.path.join(path, filename)
+        try:
+            if os.path.isfile(file_path):
+                os.remove(file_path)
+            else:
+                print(f"'{file_path}' is not a file or does not exist.")
+        except Exception as e:
+            logging.error(f"Error deleting file '{file_path}': {e}")
+
+def copy_file_or_folder(source: str, target: str, is_folder=False):
+    """Copies a file or folder."""
+    try:
+        if is_folder:
+            if os.path.exists(target):
+                shutil.rmtree(target)
+            shutil.copytree(source, target)
+            logging.info(f"Folder '{source}' copied to '{target}'")
+        else:
+            os.makedirs(os.path.dirname(target), exist_ok=True)
+            shutil.copy2(resource_path(source), target)
+            logging.info(f"File '{os.path.basename(source)}' copied to '{target}'")
+    except FileNotFoundError:
+          print(f"Error: Source '{source}' not found.")
+          logging.error(f"Error: Source '{source}' not found.")
+          sys.exit(1)
+    except Exception as e:
+        print(f"Error copying: {e}")
+        logging.error(f"Error copying {source} to {target}: {e}")
+        sys.exit(1)
+
+def get_dx11_choice(default_dx11: bool) -> str:
+    """Prompts the user to select whether to use DirectX 11."""
+    while True:
+        clear_console()
+        print("Run game with DirectX 11?")
+        print("1. Yes")
+        print("2. No")
+        print("3. Always")
+        choice = input(f"Select option (1/2/3): ").strip()
+        if choice == "1":
+            return "yes"
+        elif choice == "2":
+            return "no"
+        elif choice == "3":
+            return "always"
+        else:
+            print("Invalid input. Please select 1, 2, or 3.")
+            time.sleep(1)
+
+def install_mods(use_dx11: bool, ver: str):
+    """Installs the necessary mods for the game."""
+    cfg = load_config()
+    game_pak_dir = cfg["game_paks_directory"]
+    game_exe_path = cfg["game_executable_path"]
+    print(f"DirectX: {'11' if use_dx11 else '12'}")
+    print("Installing mod, please wait...")
+    copy_file_or_folder("./pak/bypass/winhttp.dll", os.path.join(game_exe_path, "winhttp.dll"))
+    copy_file_or_folder("./pak/bypass/config.json", os.path.join(game_exe_path, "config.json"))
+    copy_file_or_folder(f"./pak/bypass/{ver}", os.path.join(game_exe_path, ver))
+    copy_file_or_folder("./pak/bypass/libraries.txt", os.path.join(game_exe_path, "libraries.txt"))
+    copy_file_or_folder(resource_path(cfg["loader_dir"]), os.path.join(game_pak_dir, "~mods"), is_folder=True)
+    copy_file_or_folder(resource_path(cfg["mod_directory"]), os.path.join(cfg["game_dir"], "Mod"), is_folder=True)
+    if cfg["debug_mode"] == "true":
+        print("Dev mode")
+        copy_file_or_folder(resource_path(cfg["debug_dir"]), os.path.join(game_pak_dir, "~mods/"), is_folder=True)
+    time.sleep(4)
+    clear_console()
+    time.sleep(1)
+
+# --- Cleanup on Exit ---
+def cleanup():
+    """Cleans up the installed mods."""
+    try:
+        cfg = load_config()
+        game_pak_dir = cfg["game_paks_directory"]
+        ver = check_game_version()
+        filter_files = FILTER_FILES_DELETED + [ver]
+        delete_mod_directory(cfg["game_dir"], "Mod")
+        delete_mod_directory(game_pak_dir, "~mods")
+        delete_files_from_list(cfg["binaries_dir"], filter_files)
+        print("Mods removed.")
+    except Exception as e:
+        logger.error(f"Error during cleanup: {e}")
+
+# Register cleanup() to be called on exit
+atexit.register(cleanup)
+
+# --- Main Execution ---
 def check_existing_instance():
+    """Checks if another instance of the script is already running."""
     count = 0
     for process in psutil.process_iter(['pid', 'name', 'cmdline']):
         try:
@@ -439,35 +484,63 @@ def check_existing_instance():
     return count > 1
 
 def main():
+    """Main function of the Fun-Launcher."""
     if os.name != "nt":
         logger.error("This script is only supported on Windows.")
         sys.exit(1)
+
     if not ctypes.windll.shell32.IsUserAnAdmin():
         ctypes.windll.shell32.ShellExecuteW(None, "runas", sys.executable, " ".join(sys.argv), None, 1)
         sys.exit(0)
+
     if check_existing_instance():
-        print("Another instance of WW-Tweaks is already running.")
+        print("Another instance of Fun-Launcher is already running.")
         time.sleep(3)
         sys.exit(1)
-    check_and_save_config()
-    logs_path = load_log_config()
+
+    cfg = load_config()
+    logs_path = cfg["logs_folder"]
     selected_option = 0
+
+    parser = argparse.ArgumentParser()
+    parser.add_argument("-dx11", action="store_true", help="Enable DirectX 11")
+    args = parser.parse_args()
+
     while True:
         display_menu_with_cursor(logs_path, selected_option)
         key = get_key()
-        if key == b"H":
+        if key == b"H":  # Up arrow
             selected_option = (selected_option - 1) % len(MENU_OPTIONS)
-        elif key == b"P":
+        elif key == b"P":  # Down arrow
             selected_option = (selected_option + 1) % len(MENU_OPTIONS)
-        elif key == b'\x1b':
+        elif key == b'\x1b':  # ESC key
             sys.exit(0)
-        elif key in [b"\r", b" ", b"M"]:
+        elif key in [b"\r", b" ", b"M"]:  # Enter, Space, or Right arrow
             if selected_option == 0:
-                process = running_game()
-                if process:
-                    monitor_thread = threading.Thread(target=monitor_process, args=(process,))
-                    monitor_thread.daemon = True
-                    monitor_thread.start()
+                if is_process_running("Client-Win64-Shipping.exe"):
+                    print("Game is currently running. Please close it first.")
+                    logging.info("Game is currently running. Please close it first.")
+                    input("Press enter to continue...")
+                    continue
+                ver = check_game_version()
+                use_dx11 = args.dx11 or cfg["dx11"] == "true"
+                if not args.dx11:
+                    dx11_choice = get_dx11_choice(cfg["dx11"] == "true")
+                    if dx11_choice == "yes":
+                        use_dx11 = True
+                        config.set("CONFIG", "dx11", "true")
+                    elif dx11_choice == "no":
+                        use_dx11 = False
+                        config.set("CONFIG", "dx11", "false")
+                    elif dx11_choice == "always":
+                        use_dx11 = True
+                        config.set("CONFIG", "dx11", "true")
+                    with open(CONFIG_FILE, "w") as f:
+                        config.write(f)
+                install_mods(use_dx11, ver)
+                run_args = ["-dx11"] if use_dx11 else []
+                # Call the original runProgram()
+                runProgram(os.path.join(cfg["game_executable_path"], "Client-Win64-Shipping.exe"), args=run_args)
             elif selected_option == 1:
                 if set_folder_permissions(logs_path, False):
                     logger.info("Log Blocker enabled successfully!")
@@ -502,100 +575,6 @@ def main():
                 time.sleep(2)
             elif selected_option == 4:
                 sys.exit(0)
-
-def running_game():
-    if is_process_running("Client-Win64-Shipping.exe"):
-        print("Game is currently running. Please close it first.")
-        logging.info("Game is currently running. Please close it first.")
-        input("Press enter to continue...")
-        return None
-    print("Version 2.0")
-    parser = argparse.ArgumentParser()
-    parser.add_argument("-dx11", action="store_true", help="Enable DirectX 11")
-    args = parser.parse_args()
-    try:
-        cfg = load_config()
-        game_pak_dir = cfg["game_paks_directory"]
-        game_exe_path = cfg["game_executable_path"]
-        if game_pak_dir and os.path.exists(game_exe_path):
-            ver = check_game_version()
-            
-            use_dx11 = args.dx11 or cfg["dx11"] == "true"
-            if not args.dx11:
-                dx11_choice = get_dx11_choice(cfg["dx11"] == "true")
-                if dx11_choice == "yes":
-                    use_dx11 = True
-                    config.set("CONFIG", "dx11", "true")
-                    with open(CONFIG_FILE, "w") as f:
-                         config.write(f)
-                elif dx11_choice == "no":
-                    use_dx11 = False
-                    config.set("CONFIG", "dx11", "false")
-                    with open(CONFIG_FILE, "w") as f:
-                         config.write(f)
-                elif dx11_choice == "always":
-                    use_dx11 = True
-                    config.set("CONFIG", "dx11", "true")
-                    with open(CONFIG_FILE, "w") as f:
-                         config.write(f)
-            
-            print(f"DirectX: {'11' if use_dx11 else '12'}")
-            print("Installing mod, please wait...")
-            copy_file_or_folder( "./pak/bypass/winhttp.dll",  os.path.join(game_exe_path, "winhttp.dll"))
-            copy_file_or_folder( "./pak/bypass/config.json",  os.path.join(game_exe_path, "config.json"))
-            copy_file_or_folder( f"./pak/bypass/{ver}",  os.path.join(game_exe_path, ver))
-            copy_file_or_folder( "./pak/bypass/libraries.txt",  os.path.join(game_exe_path, "libraries.txt"))
-            copy_file_or_folder(cfg["loader_dir"], os.path.join(game_pak_dir,  "~mods"), is_folder=True)
-            copy_file_or_folder(cfg["mod_directory"], os.path.join(cfg["game_dir"], "Mod"), is_folder=True)
-            if cfg["debug_mode"] == "true":
-                print("Dev mode")
-                copy_file_or_folder(cfg["debug_dir"], os.path.join(game_pak_dir, "~mods/"), is_folder=True)
-            time.sleep(4)
-            clear_console()
-            time.sleep(1)
-            run_args = ["-dx11"] if use_dx11 else []
-            process = run_program(os.path.join(game_exe_path, "Client-Win64-Shipping.exe"), args=run_args)
-            if process:
-                print("Removing mod, please wait...")
-                time.sleep(1)
-                return process
-            else:
-                return None
-        else:
-            print(f"Executable '{game_exe_path}' not found. Ensure correct game folder. Try deleting config.ini.")
-            logging.error(f"Executable '{game_exe_path}' not found. Ensure correct game folder. Try deleting config.ini.")
-            return None
-    except Exception as e:
-        logging.error(f"An error occurred: {e}")
-        return None
-        
-def get_dx11_choice(default_dx11: bool) -> str:
-    while True:
-        clear_console()
-        print("Run game with DirectX 11?")
-        print("1. Yes")
-        print("2. No")
-        print("3. Always")
-        choice = input(f"Select option (1/2/3): ").strip()
-        if choice == "1":
-            return "yes"
-        elif choice == "2":
-            return "no"
-        elif choice == "3":
-            return "always"
-        else:
-            print("Invalid input. Please select 1, 2, or 3.")
-            time.sleep(1)
-
-def cleanup():
-    cfg = load_config()
-    game_pak_dir = cfg["game_paks_directory"]
-    ver = check_game_version()
-    filter_files = FILTER_FILES_DELETED + [ver]
-    delete_mod_directory(cfg["game_dir"], "Mod")
-    delete_mod_directory(game_pak_dir, "~mods")
-    delete_files_from_list(cfg["binaries_dir"], filter_files)
-    print("Mods removed.")
 
 if __name__ == "__main__":
     main()
