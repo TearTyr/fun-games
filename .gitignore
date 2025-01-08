@@ -2,3 +2,6 @@ config.ini
 launcher.log
 output
 *.exe
+/others
+launcher.spec
+/build
