@@ -8,7 +8,7 @@ Source Code: [Waves Mod 2.0](https://github.com/saefulbarkah/wuthering-wave-mod)
 - You can now choose to run the game with DirectX 11 at launch, with an option to always use it.
 
 ## HOW TO USE
-1. Download [latest version launcher](https://github.com/saefulbarkah/fun-games/releases)
+1. Download [latest version launcher](https://github.com/TearTyr/fun-games/releases)
 2. Extract it, and place it in a folder, and run `launcher.exe` as administrator.
 3. Select `Wuthering Waves Game` folder.
 4. If needed, select your game version (Global/CN).
@@ -29,6 +29,15 @@ If you prefer to manage the log blocker manually, you can still do so:
 - Go to `Security tab` click edit
 - ![Capture](https://github.com/user-attachments/assets/60defe45-9d19-44ed-99db-70ed0430f946)
 - Apply
+
+## Menu Navigation
+The launcher uses a simple text-based menu. Here's how to navigate it:
+
+- **Up/Down Arrow Keys:** Use the Up and Down arrow keys on your keyboard to move the selection cursor (the `→` symbol) between the menu options.
+- **Select Option:** To select the highlighted menu option, you can press any of the following keys:
+    - **Enter Key:** Press the Enter key on your keyboard.
+    - **Spacebar:** Press the Spacebar on your keyboard.
+    - **Right Arrow Key:** Press the Right arrow key on your keyboard.
 
 ## Features
 - Open mod Menu (Alt + X)
