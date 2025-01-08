@@ -37,6 +37,7 @@ MENU_OPTIONS = [
     "Disable Log Blocker (Allow Write Permissions)",
     "Change Logs Path",
     "Exit",
+    "Cleanup"
 ]
 
 # --- Logging Setup ---
@@ -68,23 +69,19 @@ class LoadConfigTyped(TypedDict):
 
 # --- Utility Functions ---
 def hide_console():
-    """Hides the console window."""
     hwnd = ctypes.windll.kernel32.GetConsoleWindow()
     if hwnd:
         ctypes.windll.user32.ShowWindow(hwnd, 0)
 
 def clear_console():
-    """Clears the console."""
     os.system("cls" if os.name == "nt" else "clear")
 
 def show_console():
-    """Shows the console window."""
     hwnd = ctypes.windll.kernel32.GetConsoleWindow()
     if hwnd:
         ctypes.windll.user32.ShowWindow(hwnd, 5)
 
 def is_process_running(process_name: str) -> bool:
-    """Checks if a process with the given name is running."""
     for proc in psutil.process_iter(["name"]):
         try:
             if proc.info["name"] == process_name:
@@ -94,7 +91,6 @@ def is_process_running(process_name: str) -> bool:
     return False
 
 def resource_path(relative_path: str) -> str:
-    """Gets the absolute path to a resource, works for dev and for PyInstaller."""
     try:
         base_path = sys._MEIPASS
     except AttributeError:
@@ -103,7 +99,6 @@ def resource_path(relative_path: str) -> str:
 
 # --- Configuration Management ---
 def create_default_config():
-    """Creates a default configuration file if it doesn't exist."""
     if not os.path.exists(CONFIG_FILE):
         config["CONFIG"] = {
             "game_paks_directory": "",
@@ -125,12 +120,10 @@ def create_default_config():
         logger.info("config.ini created with default settings.")
 
 def is_valid_game_directory(path: str) -> bool:
-    """Checks if the given path is a valid Wuthering Waves game directory."""
     required_files = ["Client-Win64-Shipping.exe"]
     return all(os.path.exists(os.path.join(path, "Client", "Binaries", "Win64", file)) for file in required_files)
 
 def save_game_directory():
-    """Prompts the user to select the Wuthering Waves game directory and saves it to the config."""
     path = askdirectory(title="Select Wuthering Waves Game Folder")
     if path:
         if not is_valid_game_directory(path):
@@ -152,28 +145,23 @@ def save_game_directory():
         logger.info(f"Game directory saved: {path}")
 
 def load_config() -> LoadConfigTyped:
-    """Loads the configuration from the config file."""
     create_default_config()
     config.read(CONFIG_FILE)
 
-    # Ensure CONFIG section exists
     if not config.has_section("CONFIG"):
         logger.warning("CONFIG section is missing, creating default config.")
         create_default_config()
         config.read(CONFIG_FILE)
 
-    # Check and set game directory if missing or invalid
     if not config.has_option("CONFIG", "game_paks_directory") or not config.get("CONFIG", "game_paks_directory") or not is_valid_game_directory(config.get("CONFIG", "game_dir")):
         logger.warning("Wuthering Waves game directory not found or invalid, prompting user to select.")
         save_game_directory()
-        config.read(CONFIG_FILE)  # Reload after saving
+        config.read(CONFIG_FILE)
 
-    # Check and set game version if missing
     if not config.has_option("CONFIG", "version") or not config.get("CONFIG", "version"):
         set_game_version()
-        config.read(CONFIG_FILE)  # Reload after setting
+        config.read(CONFIG_FILE)
 
-    # Load and return configuration
     return LoadConfigTyped(
         game_paks_directory=config.get("CONFIG", "game_paks_directory").strip('"'),
         mod_directory=config.get("CONFIG", "mod_directory").strip('"'),
@@ -192,7 +180,6 @@ def load_config() -> LoadConfigTyped:
 
 # --- Game Version Management ---
 def set_game_version():
-    """Prompts the user to select the game version (OS or CN) and saves it to the config."""
     while True:
         clear_console()
         print("Select Game Version: \n")
@@ -220,7 +207,6 @@ def set_game_version():
             clear_console()
 
 def check_game_version() -> str:
-    """Checks the game version in the config and sets a default if it's invalid."""
     config_data = load_config()
     if config_data["version"] not in ["CN", "OS"]:
         default_ver = set_game_version()
@@ -233,23 +219,45 @@ def check_game_version() -> str:
 
 # --- Log Blocker Functions ---
 def set_folder_permissions(folder_path: str, allow_write: bool = False) -> bool:
-    """Sets folder permissions to allow or deny write access for the Users group."""
     try:
         sd = win32security.GetFileSecurity(folder_path, win32security.DACL_SECURITY_INFORMATION)
         dacl = sd.GetSecurityDescriptorDacl()
         users_sid = win32security.LookupAccountName("", USERS_GROUP)[0]
+        print(f"Updating permissions for: {folder_path}")
+        
+        # Remove existing ACE for Users
         for i in range(dacl.GetAceCount() - 1, -1, -1):
-            if dacl.GetAce(i)[2] == users_sid:
-                 dacl.DeleteAce(i)
-        access = con.FILE_GENERIC_READ | con.FILE_GENERIC_EXECUTE
+            ace = dacl.GetAce(i)
+            if ace[2] == users_sid:
+                print(f"  - Removing existing ACE for Users at index {i}")
+                dacl.DeleteAce(i)
+
+
         if allow_write:
-            access |= con.FILE_GENERIC_WRITE
-        dacl.AddAccessAllowedAce(win32security.ACL_REVISION, access, users_sid)
-        if not allow_write:
-            dacl.AddAccessDeniedAce(win32security.ACL_REVISION, con.FILE_GENERIC_WRITE, users_sid)
+            print("  - Adding ACE to allow read, write and execute")
+            dacl.AddAccessAllowedAce(
+                win32security.ACL_REVISION,
+                con.FILE_GENERIC_READ | con.FILE_GENERIC_WRITE | con.FILE_GENERIC_EXECUTE,
+                users_sid,
+            )
+        else:
+            print("  - Adding ACE to allow read and execute")
+            dacl.AddAccessAllowedAce(
+                win32security.ACL_REVISION,
+                con.FILE_GENERIC_READ | con.FILE_GENERIC_EXECUTE,
+                users_sid,
+            )
+            print("  - Adding ACE to deny write")
+            dacl.AddAccessDeniedAce(
+                win32security.ACL_REVISION,
+                con.FILE_GENERIC_WRITE,
+                users_sid,
+            )
+
         sd.SetSecurityDescriptorDacl(1, dacl, 0)
         win32security.SetFileSecurity(folder_path, win32security.DACL_SECURITY_INFORMATION, sd)
         logger.info(f"Permissions updated for {folder_path}: {'Write Allowed' if allow_write else 'Write Denied'}")
+        print(f"Permissions updated for {folder_path}: {'Write Allowed' if allow_write else 'Write Denied'}")
         return True
     except pywintypes.error as e:
         logger.error(f"Error setting permissions for {folder_path}: {e}")
@@ -259,13 +267,11 @@ def set_folder_permissions(folder_path: str, allow_write: bool = False) -> bool:
         return False
 
 def get_folder_with_ui() -> Optional[str]:
-    """Opens a simple UI for the user to select a folder."""
     root = tk.Tk()
     root.withdraw()
     return filedialog.askdirectory()
 
 def check_log_blocker_status(logs_path: str) -> Tuple[str, str]:
-    """Checks if the log blocker is currently enabled or disabled."""
     try:
         test_file = os.path.join(logs_path, "test.txt")
         with open(test_file, "w") as f:
@@ -281,16 +287,13 @@ def check_log_blocker_status(logs_path: str) -> Tuple[str, str]:
 
 # --- UI and Menu Functions ---
 def get_terminal_size():
-    """Gets the terminal size."""
     terminal_size = shutil.get_terminal_size()
     return terminal_size.columns, terminal_size.lines
 
 def center_text(text: str, width: int) -> str:
-    """Centers text within the given width."""
     return text.center(width)
 
 def display_menu_with_cursor(logs_path: str, selected_option: int):
-    """Displays the main menu with a cursor indicating the selected option."""
     clear_console()
     status, color = check_log_blocker_status(logs_path)
     term_width, _ = get_terminal_size()
@@ -305,37 +308,36 @@ def display_menu_with_cursor(logs_path: str, selected_option: int):
         print(center_text(f"{'\033[97m' if i == selected_option else ''}{padded_option}\033[0m", term_width))
 
 def get_key():
-    """Gets a keypress."""
     while True:
         if msvcrt.kbhit():
             return msvcrt.getch()
 
 # --- Game Launch and Mod Management ---
+launch_cancelled = False 
+
 def runProgram(executable_path, args=None):
-    """Runs the game executable with the given arguments"""
+    global launch_cancelled
     cfg = load_config()
     try:
         if args is None:
             args = []
         logging.info("Starting the game")
         print("This cheat is free. If you bought it, you might have been SCAMMED!")
-        print("Credits: Xoph")
-        print("Launcher Credits: saefulbarkah")
+        print("Credits")
+        print("Xoph")
+        print("saefulbarkah")
         print("Starting the game, Please wait 5 seconds...")
         time.sleep(5)
         hide_console()
         clear_console()
-        # Start the process without admin privileges
         process = subprocess.Popen(
             [executable_path] + args,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
-            shell=True,  # This opens a new shell to execute the command
-            close_fds=True,  # Close file descriptors
+            shell=True,
+            close_fds=True,
             cwd=cfg["game_executable_path"],
         )
-
-        # Optionally, capture the output
         stdout, stderr = process.communicate()
         monitorProcess(process)
 
@@ -344,21 +346,23 @@ def runProgram(executable_path, args=None):
         logging.error(f"Error running executable: {e}")
 
 def monitorProcess(process):
-    """Monitors the game process"""
+    global launch_cancelled
     try:
         while True:
-            if process.poll() is not None:  # Check if the process has terminated
+            if process.poll() is not None:
                 show_console()
-                print("Game closed. Mods will be automatically removed.")  # Log the message
-                break  # Exit the loop if the process has terminated
-
-            time.sleep(5)  # Check every 5 seconds
+                print("Game closed. Mods will be automatically removed.")
+                break
+            if launch_cancelled:
+                terminateProcess(process)
+                print("Game process terminated due to cancellation.")
+                break
+            time.sleep(5)
     except KeyboardInterrupt:
         print("Stopping game due to interruption.")
         terminateProcess(process)
 
 def terminateProcess(process):
-    """Terminates the game process."""
     try:
         process.terminate()
         process.wait(timeout=5)
@@ -370,7 +374,6 @@ def terminateProcess(process):
         logging.info(f"Process killed.")
 
 def delete_mod_directory(path_dir: str, mod_dir: str):
-    """Deletes the mod directory."""
     try:
         mod_folder_path = os.path.join(path_dir, os.path.basename(mod_dir))
         if os.path.exists(mod_folder_path):
@@ -382,7 +385,6 @@ def delete_mod_directory(path_dir: str, mod_dir: str):
         logging.error(f"Error deleting mod directory: {e}")
 
 def delete_files_from_list(path: str, file_list: List[str]):
-    """Deletes files from the given list in the specified path."""
     for filename in file_list:
         file_path = os.path.join(path, filename)
         try:
@@ -394,7 +396,6 @@ def delete_files_from_list(path: str, file_list: List[str]):
             logging.error(f"Error deleting file '{file_path}': {e}")
 
 def copy_file_or_folder(source: str, target: str, is_folder=False):
-    """Copies a file or folder."""
     try:
         if is_folder:
             if os.path.exists(target):
@@ -415,14 +416,19 @@ def copy_file_or_folder(source: str, target: str, is_folder=False):
         sys.exit(1)
 
 def get_dx11_choice(default_dx11: bool) -> str:
-    """Prompts the user to select whether to use DirectX 11."""
+    global launch_cancelled
     while True:
         clear_console()
         print("Run game with DirectX 11?")
         print("1. Yes")
         print("2. No")
         print("3. Always")
+        print("Press Ctrl+C to cancel launch")
         choice = input(f"Select option (1/2/3): ").strip()
+
+        if launch_cancelled:
+            return "cancel"
+
         if choice == "1":
             return "yes"
         elif choice == "2":
@@ -434,7 +440,6 @@ def get_dx11_choice(default_dx11: bool) -> str:
             time.sleep(1)
 
 def install_mods(use_dx11: bool, ver: str):
-    """Installs the necessary mods for the game."""
     cfg = load_config()
     game_pak_dir = cfg["game_paks_directory"]
     game_exe_path = cfg["game_executable_path"]
@@ -455,7 +460,6 @@ def install_mods(use_dx11: bool, ver: str):
 
 # --- Cleanup on Exit ---
 def cleanup():
-    """Cleans up the installed mods."""
     try:
         cfg = load_config()
         game_pak_dir = cfg["game_paks_directory"]
@@ -473,7 +477,6 @@ atexit.register(cleanup)
 
 # --- Main Execution ---
 def check_existing_instance():
-    """Checks if another instance of the script is already running."""
     count = 0
     for process in psutil.process_iter(['pid', 'name', 'cmdline']):
         try:
@@ -484,7 +487,7 @@ def check_existing_instance():
     return count > 1
 
 def main():
-    """Main function of the Fun-Launcher."""
+    global launch_cancelled
     if os.name != "nt":
         logger.error("This script is only supported on Windows.")
         sys.exit(1)
@@ -509,13 +512,13 @@ def main():
     while True:
         display_menu_with_cursor(logs_path, selected_option)
         key = get_key()
-        if key == b"H":  # Up arrow
+        if key == b"H":
             selected_option = (selected_option - 1) % len(MENU_OPTIONS)
-        elif key == b"P":  # Down arrow
+        elif key == b"P":
             selected_option = (selected_option + 1) % len(MENU_OPTIONS)
-        elif key == b'\x1b':  # ESC key
+        elif key == b'\x1b':
             sys.exit(0)
-        elif key in [b"\r", b" ", b"M"]:  # Enter, Space, or Right arrow
+        elif key in [b"\r", b" ", b"M"]:
             if selected_option == 0:
                 if is_process_running("Client-Win64-Shipping.exe"):
                     print("Game is currently running. Please close it first.")
@@ -524,8 +527,33 @@ def main():
                     continue
                 ver = check_game_version()
                 use_dx11 = args.dx11 or cfg["dx11"] == "true"
+
+                def cancellation_monitor():
+                    global launch_cancelled
+                    while not launch_cancelled:
+                        try:
+                            if msvcrt.kbhit():
+                                key = msvcrt.getch()
+                                if key == b'\x03':
+                                    launch_cancelled = True
+                                    print("Cancelling launch...")
+                                    break
+                        except Exception as e:
+                            print(f"Error in cancellation monitor: {e}")
+                        time.sleep(0.1)
+
+                cancellation_thread = threading.Thread(target=cancellation_monitor)
+                cancellation_thread.daemon = True
+                cancellation_thread.start()
+
                 if not args.dx11:
                     dx11_choice = get_dx11_choice(cfg["dx11"] == "true")
+
+                    if dx11_choice == "cancel":
+                        launch_cancelled = False
+                        print("Launch cancelled.")
+                        continue
+
                     if dx11_choice == "yes":
                         use_dx11 = True
                         config.set("CONFIG", "dx11", "true")
@@ -537,10 +565,12 @@ def main():
                         config.set("CONFIG", "dx11", "true")
                     with open(CONFIG_FILE, "w") as f:
                         config.write(f)
+                launch_cancelled = False
                 install_mods(use_dx11, ver)
                 run_args = ["-dx11"] if use_dx11 else []
-                # Call the original runProgram()
                 runProgram(os.path.join(cfg["game_executable_path"], "Client-Win64-Shipping.exe"), args=run_args)
+                launch_cancelled = False
+
             elif selected_option == 1:
                 if set_folder_permissions(logs_path, False):
                     logger.info("Log Blocker enabled successfully!")
@@ -575,6 +605,10 @@ def main():
                 time.sleep(2)
             elif selected_option == 4:
                 sys.exit(0)
+            elif selected_option == 5:
+                cleanup()
+                print("Manual cleanup performed.")
+                time.sleep(2)
 
 if __name__ == "__main__":
     main()
