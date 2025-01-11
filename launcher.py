@@ -232,7 +232,6 @@ def set_folder_permissions(folder_path: str, allow_write: bool = False) -> bool:
                 print(f"  - Removing existing ACE for Users at index {i}")
                 dacl.DeleteAce(i)
 
-
         if allow_write:
             print("  - Adding ACE to allow read, write and execute")
             dacl.AddAccessAllowedAce(
@@ -315,7 +314,7 @@ def get_key():
 # --- Game Launch and Mod Management ---
 launch_cancelled = False 
 
-def runProgram(executable_path, args=None):
+def runProgram(executable_path: str, args: Optional[List[str]] = None):
     global launch_cancelled
     cfg = load_config()
     try:
@@ -345,7 +344,7 @@ def runProgram(executable_path, args=None):
         print(f"Error running executable: {e}")
         logging.error(f"Error running executable: {e}")
 
-def monitorProcess(process):
+def monitorProcess(process: subprocess.Popen):
     global launch_cancelled
     try:
         while True:
@@ -362,7 +361,7 @@ def monitorProcess(process):
         print("Stopping game due to interruption.")
         terminateProcess(process)
 
-def terminateProcess(process):
+def terminateProcess(process: subprocess.Popen):
     try:
         process.terminate()
         process.wait(timeout=5)
@@ -505,10 +504,11 @@ def main():
     logs_path = cfg["logs_folder"]
     selected_option = 0
 
-    parser = argparse.ArgumentParser()
+    parser = argparse.ArgumentParser(description="Fun-Launcher for Wuthering Waves")
     parser.add_argument("-dx11", action="store_true", help="Enable DirectX 11")
-    args = parser.parse_args()
+    parser.add_argument("-noskip", action="store_true", help="Disable Skip Splash Intro")
 
+    args = parser.parse_args()
     while True:
         display_menu_with_cursor(logs_path, selected_option)
         key = get_key()
@@ -525,7 +525,7 @@ def main():
                     logging.info("Game is currently running. Please close it first.")
                     input("Press enter to continue...")
                     continue
-                
+
                 # Check log blocker status and enable if needed
                 status, _ = check_log_blocker_status(logs_path)
                 if status == "NOT RUNNING":
@@ -540,7 +540,7 @@ def main():
                         logger.error("Failed to enable Log Blocker (automatic)!")
                         print("Failed to enable Log Blocker (automatic).")
                     time.sleep(2)
-                
+
                 ver = check_game_version()
                 use_dx11 = args.dx11 or cfg["dx11"] == "true"
 
@@ -584,6 +584,11 @@ def main():
                 launch_cancelled = False
                 install_mods(use_dx11, ver)
                 run_args = ["-dx11"] if use_dx11 else []
+                
+                # Add -SkipSplash to run_args if -noskip is not provided
+                if not args.noskip:
+                    run_args.append("-SkipSplash")
+
                 runProgram(os.path.join(cfg["game_executable_path"], "Client-Win64-Shipping.exe"), args=run_args)
                 launch_cancelled = False
 
