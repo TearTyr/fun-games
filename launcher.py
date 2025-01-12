@@ -91,11 +91,12 @@ def is_process_running(process_name: str) -> bool:
     return False
 
 def resource_path(relative_path: str) -> str:
-    try:
-        base_path = sys._MEIPASS
-    except AttributeError:
-        base_path = os.path.abspath(".")
+    if hasattr(sys, '_MEIPASS'):
+        base_path = os.path.dirname(sys.executable)
+    else:
+        base_path = os.path.dirname(os.path.abspath(__file__))
     return os.path.join(base_path, relative_path)
+
 
 # --- Configuration Management ---
 def create_default_config():
@@ -399,7 +400,7 @@ def copy_file_or_folder(source: str, target: str, is_folder=False):
         if is_folder:
             if os.path.exists(target):
                 shutil.rmtree(target)
-            shutil.copytree(source, target)
+            shutil.copytree(resource_path(source), target)
             logging.info(f"Folder '{source}' copied to '{target}'")
         else:
             os.makedirs(os.path.dirname(target), exist_ok=True)
@@ -466,7 +467,51 @@ def cleanup():
         filter_files = FILTER_FILES_DELETED + [ver]
         delete_mod_directory(cfg["game_dir"], "Mod")
         delete_mod_directory(game_pak_dir, "~mods")
-        delete_files_from_list(cfg["binaries_dir"], filter_files)
+        for filename in filter_files:
+            file_path = os.path.join(cfg["binaries_dir"], filename)
+            try:
+                if os.path.isfile(file_path):
+                    os.remove(file_path)
+                else:
+                    print(f"'{file_path}' is not a file or does not exist.")
+            except Exception as e:
+                logging.error(f"Error deleting file '{file_path}': {e}")
+
+        # Scrub log file
+        log_file_path = os.path.join(cfg["logs_folder"], "Client.log")
+        if os.path.exists(log_file_path):
+            try:
+                with open(log_file_path, 'r', encoding='utf-8', errors='ignore') as f:
+                    lines = f.readlines()
+
+                filtered_lines = []
+                previous_line_contains_mods = False
+                for line in lines:
+                    if "~mods" in line:
+                        previous_line_contains_mods = True
+                        # Skip the current line, as it contains "~mods"
+                        continue
+                    elif "OnPakFileMounted2Time" in line and previous_line_contains_mods:
+                        # Skip this line if it follows a line with ~mods and is a OnPakFileMounted2Time line.
+                        previous_line_contains_mods = False
+                        continue
+                    else:
+                        filtered_lines.append(line)
+                        previous_line_contains_mods = False
+
+                with open(log_file_path, 'w', encoding='utf-8', errors='ignore') as f:
+                  f.writelines(filtered_lines)
+
+                logger.info("Removed ~mods lines from Client.log")
+                print("Removed ~mods lines from Client.log")
+
+            except Exception as e:
+                logger.error(f"Error scrubbing log file: {e}")
+                print(f"Error scrubbing log file: {e}")
+        else:
+          print("Client.log not found.")
+          logger.info("Client.log not found")
+
         print("Mods removed.")
     except Exception as e:
         logger.error(f"Error during cleanup: {e}")
